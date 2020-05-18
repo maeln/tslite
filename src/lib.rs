@@ -11,7 +11,7 @@ use chrono::{DateTime, Datelike, Duration, TimeZone, Timelike, Utc};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::error::Error;
 use std::fs::File;
-use std::io::{Cursor, Write};
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::string::String;
 
@@ -180,6 +180,99 @@ impl PhysicalDB {
         );
         Ok(())
     }
+
+    pub fn close(&mut self) -> Result<(), EnodError> {
+        if self.file.is_some() {
+            self.file
+                .as_ref()
+                .unwrap()
+                .sync_all()
+                .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+            self.file = None; // Files are close when dropped/out of scope.
+        }
+
+        Ok(())
+    }
+
+    pub fn read_header(&mut self) -> Result<DbHeader, EnodError> {
+        if self.file.is_none() {
+            self.open()?;
+        }
+
+        let mut fref = self.file.as_ref().unwrap();
+        let mut buffer = [0; 15]; // Header takes 15 bytes.
+        let n = fref
+            .read(&mut buffer[..])
+            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+        if n == 15 {
+            let header: DbHeader = DbHeader::from(&buffer[..]);
+            return Ok(header);
+        }
+
+        Err(EnodError::IOError(
+            "Could not read header: not enough octets.".to_string(),
+        ))
+    }
+
+    /// The size of the header and record are static.
+    /// So the position of each record is deterministic.
+    /// If `n` is the record id, then its position within the file can be computed with :
+    /// pos(n) = (7 + 8) + (5*n)
+    pub fn read_record(&mut self, rec_id: u64) -> Result<RecordInfo, EnodError> {
+        if self.file.is_none() {
+            self.open()?;
+        }
+
+        let pos = (7 + 8) + (rec_id * 5);
+        let mut fref = self.file.as_ref().unwrap();
+        fref.seek(SeekFrom::Start(pos))
+            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+        let mut buffer = [0; 5]; // Header takes 15 bytes.
+        let n = fref
+            .read(&mut buffer[..])
+            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+        if n == 5 {
+            let record: RecordInfo = RecordInfo::from(&buffer[..]);
+            return Ok(record);
+        }
+
+        Err(EnodError::IOError(
+            "Could not read record: not enough octets.".to_string(),
+        ))
+    }
+
+    pub fn update_record_number(&mut self, drn: u64) -> Result<(), EnodError> {
+        if self.file.is_none() {
+            self.open()?;
+        }
+
+        let mut fref = self.file.as_ref().unwrap();
+        fref.seek(SeekFrom::Start(7)) // The record number is always at position 7
+            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+        fref.write_u64::<LittleEndian>(self.header.records_number + drn)
+            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+        self.header.records_number += drn;
+
+        Ok(())
+    }
+
+    pub fn append_record(&mut self, rec_nfo: RecordInfo) -> Result<(), EnodError> {
+        if self.file.is_none() {
+            self.open()?;
+        }
+
+        // write record
+        let mut fref = self.file.as_ref().unwrap();
+        fref.seek(SeekFrom::End(0))
+            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+        fref.write(&rec_nfo.as_bytes())
+            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+
+        // Update DbHeader
+        self.update_record_number(1)?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -227,4 +320,6 @@ mod tests {
 
         fs::remove_file("create_db_origin_specific.db");
     }
+
+    fn append_record() {}
 }
