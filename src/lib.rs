@@ -1,8 +1,33 @@
 //! # DB encoding
+//!
 //! Every number will be store in db with little-endian ordering.
 //! We will store records in db in a way that the latest (as in, its actual time) record will always be at the end of the file.
 //! But we should do something that will periodicly check the sanity of the DB and fix mistakes (i.e, sort the whole DB).
 //! This could be definitly be easier by holding the DB in memory and doing any I/O in memory before the DB is commited to the file.
+//!
+//!
+//! # File orga
+//!
+//! ```
+//! +--------------------------------------------+
+//! | HEADER | RECORD1 | RECORD2 | RECORD3 | ... |
+//! +--------------------------------------------+
+//! ```
+//!
+//! ```
+//! +-------------------------------------------[HEADER]---------------------------------------------+
+//! |--------------------------[TIMESTAMP]------------------------|---------[RECORD COUNT]-----------|
+//! |      year      |  month |  day   |  hour  | minute | second |              64bit               |
+//! |     16bit      |  8bit  |  8bit  |  8bit  |  8bit  |  8bit  |                                  |
+//! +------------------------------------------------------------------------------------------------+
+//! ```
+//!
+//! ```
+//! +-------------------[RECORD]------------+
+//! |--------[TIME OFFSET]--------|-[VALUE]-|
+//! |            32bit            |   8bit  |
+//! +---------------------------------------+
+//! ```
 
 extern crate chrono;
 
