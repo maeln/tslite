@@ -75,7 +75,7 @@ impl Timestamp {
 /// Represent an entry in the database.
 /// `time_offset` represent the number of seconds passed since the origin date of the DB.
 /// It's a u32, which means you should be able to store record up to 136 years after the origin date of the DB.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct RecordInfo {
     time_offset: u32,
     value: u8,
@@ -194,6 +194,8 @@ impl PhysicalDB {
         Ok(())
     }
 
+    /// Read the header from the file.
+    /// Does not update the header in memory.
     pub fn read_header(&mut self) -> Result<DbHeader, EnodError> {
         if self.file.is_none() {
             self.open()?;
@@ -321,5 +323,30 @@ mod tests {
         fs::remove_file("create_db_origin_specific.db");
     }
 
-    fn append_record() {}
+    #[test]
+    fn append_record() {
+        let path = "append_record.db";
+
+        fs::remove_file(path);
+
+        let mut db = PhysicalDB::create(&Path::new(path), None).expect("could not create db.");
+        let header = db.read_header().expect("could not read header");
+        assert_eq!(header.records_number, 0);
+
+        let origin_record = RecordInfo {
+            time_offset: 5,
+            value: 10,
+        };
+
+        db.append_record(origin_record)
+            .expect("could not append record.");
+
+        let fs_record = db.read_record(0).expect("could not get record.");
+        assert_eq!(origin_record, fs_record);
+
+        let header = db.read_header().expect("could not read header");
+        assert_eq!(header.records_number, 1);
+
+        fs::remove_file(path);
+    }
 }
