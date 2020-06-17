@@ -10,7 +10,7 @@ use chrono::{DateTime, Datelike, Duration, TimeZone, Timelike, Utc};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::error::Error;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::string::String;
@@ -176,7 +176,11 @@ impl PhysicalDB {
         }
 
         self.file = Some(
-            File::open(&self.path).map_err(|e| EnodError::IOError(e.to_string().to_string()))?,
+            OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&self.path)
+                .map_err(|e| EnodError::IOError(e.to_string().to_string()))?,
         );
         Ok(())
     }
@@ -202,6 +206,8 @@ impl PhysicalDB {
         }
 
         let mut fref = self.file.as_ref().unwrap();
+        fref.seek(SeekFrom::Start(0))
+            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
         let mut buffer = [0; 15]; // Header takes 15 bytes.
         let n = fref
             .read(&mut buffer[..])
@@ -259,7 +265,7 @@ impl PhysicalDB {
     }
 
     pub fn append_record(&mut self, rec_nfo: RecordInfo) -> Result<(), EnodError> {
-        if self.file.is_none() {
+        if self.file.is_some() {
             self.open()?;
         }
 
@@ -268,6 +274,8 @@ impl PhysicalDB {
         fref.seek(SeekFrom::End(0))
             .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
         fref.write(&rec_nfo.as_bytes())
+            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+        fref.sync_all()
             .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
 
         // Update DbHeader
