@@ -1,3 +1,5 @@
+//! A very simple embedded time-serie database.
+//!
 //! # DB encoding
 //!
 //! Every number will be store in db with little-endian ordering.
@@ -8,13 +10,13 @@
 //!
 //! # File orga
 //!
-//! ```
+//! ```text
 //! +--------------------------------------------+
 //! | HEADER | RECORD1 | RECORD2 | RECORD3 | ... |
 //! +--------------------------------------------+
 //! ```
 //!
-//! ```
+//! ```text
 //! +-------------------------------------------[HEADER]---------------------------------------------+
 //! |--------------------------[TIMESTAMP]------------------------|---------[RECORD COUNT]-----------|
 //! |      year      |  month |  day   |  hour  | minute | second |              64bit               |
@@ -22,7 +24,7 @@
 //! +------------------------------------------------------------------------------------------------+
 //! ```
 //!
-//! ```
+//! ```text
 //! +-------------------[RECORD]------------+
 //! |--------[TIME OFFSET]--------|-[VALUE]-|
 //! |            32bit            |   8bit  |
@@ -195,6 +197,7 @@ impl PhysicalDB {
         })
     }
 
+    /// Open the database file in read and write mode.
     pub fn open(&mut self) -> Result<(), EnodError> {
         if self.file.is_some() {
             return Ok(());
@@ -210,6 +213,8 @@ impl PhysicalDB {
         Ok(())
     }
 
+    /// Drop the database file to close it.
+    /// Make sure to sync all IO operation before closing it.
     pub fn close(&mut self) -> Result<(), EnodError> {
         if self.file.is_some() {
             self.file
@@ -274,6 +279,7 @@ impl PhysicalDB {
         ))
     }
 
+    /// This utility function will update the number of record in the database.
     pub fn update_record_number(&mut self, drn: u64) -> Result<(), EnodError> {
         if self.file.is_none() {
             self.open()?;
@@ -289,6 +295,7 @@ impl PhysicalDB {
         Ok(())
     }
 
+    /// Add a record in the database.
     pub fn append_record(&mut self, rec_nfo: RecordInfo) -> Result<(), EnodError> {
         if self.file.is_some() {
             self.open()?;
