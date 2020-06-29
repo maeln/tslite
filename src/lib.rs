@@ -97,6 +97,33 @@ impl Timestamp {
         store.push(self.second);
         store
     }
+
+    /// Check if a date is valid.
+    pub fn is_valid(&self) -> bool {
+        let mut valid = true;
+        valid &= 1 >= self.month && self.month <= 12;
+        valid &= 1 >= self.day;
+        valid &= self.hour < 24;
+        valid &= self.minute < 60;
+        valid &= self.second < 60;
+
+        // As usual, we have to handle febuary as an edge-case.
+        if self.month == 2 {
+            // We check if this year is a leap year
+            let factor = |x| self.year % x == 0;
+            let leap = factor(4) && (!factor(100) || factor(400));
+            if leap {
+                valid &= self.day <= 29;
+            } else {
+                valid &= self.day <= 28;
+            }
+        } else {
+            valid &=
+                (self.month % 2 == 0 && self.day <= 30) || (self.month % 2 == 1 && self.day <= 31);
+        }
+
+        valid
+    }
 }
 
 /// Represent an entry in the database.
@@ -156,6 +183,20 @@ impl DbHeader {
             .unwrap();
         store
     }
+}
+
+/// Potential Issue in the DB file
+pub enum DbIssue {
+    /// If a record is not properly chonologicaly ordered.
+    UnorderedRecord,
+    /// If the header is corrupted (cannot be fully read or data are wrong).
+    HeaderCorrupted,
+    /// If a record is corrupted (cannot be fully read or data are wrong) with its index.
+    RecordCorrupted(u64),
+    /// If the number of record in the header doesn't match the amount that can be read from the physical file.
+    MismatchRecordAmount,
+    /// Indicate that there is no known issue
+    None,
 }
 
 /// a DB in file
@@ -314,6 +355,44 @@ impl PhysicalDB {
         self.update_record_number(1)?;
 
         Ok(())
+    }
+
+    /// Perform check to find any issue in the database file.
+    /// It will return the first issue it find. You might need to run this function
+    /// until it return `DbIssue::None` to check for all possible issue.
+    pub fn check_db_file(&mut self) -> Result<DbIssue, EnodError> {
+        if self.file.is_some() {
+            self.open()?;
+        }
+
+        // First try to read the header
+        let res_header = self.read_header();
+        if res_header.is_err() {
+            return Ok(DbIssue::HeaderCorrupted);
+        }
+        let header = res_header.unwrap();
+        if !header.origin_date.is_valid() {
+            return Ok(DbIssue::HeaderCorrupted);
+        }
+
+        for i in 0..header.records_number {
+            let res_record = self.read_record(i);
+            if res_record.is_err() {
+                return Ok(DbIssue::RecordCorrupted(i));
+            }
+        }
+
+        let metadata = self
+            .file
+            .as_ref()
+            .unwrap()
+            .metadata()
+            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+        if metadata.len() > (/* header size */120 + /* records size */ 40 * header.records_number) {
+            return Ok(DbIssue::MismatchRecordAmount);
+        }
+
+        Ok(DbIssue::None)
     }
 }
 
