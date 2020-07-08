@@ -42,6 +42,8 @@ use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::string::String;
 
+use std::cmp::{Ord, Ordering};
+
 #[derive(Debug, PartialEq)]
 pub enum EnodError {
     IOError(String),
@@ -49,7 +51,7 @@ pub enum EnodError {
 
 /// A way to store date and time in 56bits / 7 octets.
 /// There is no awareness of timezone, everything is assumed to be Utc+0.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Timestamp {
     year: u16,
     month: u8,
@@ -83,6 +85,32 @@ impl From<&[u8]> for Timestamp {
             minute: reader.read_u8().unwrap(),
             second: reader.read_u8().unwrap(),
         }
+    }
+}
+
+impl PartialOrd for Timestamp {
+    fn partial_cmp(&self, other: &Timestamp) -> Option<Ordering> {
+        Some(
+            self.year
+                .cmp(&other.year)
+                .then(self.month.cmp(&other.month))
+                .then(self.day.cmp(&other.day))
+                .then(self.hour.cmp(&other.hour))
+                .then(self.minute.cmp(&other.minute))
+                .then(self.second.cmp(&other.second)),
+        )
+    }
+}
+
+impl Ord for Timestamp {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.year
+            .cmp(&other.year)
+            .then(self.month.cmp(&other.month))
+            .then(self.day.cmp(&other.day))
+            .then(self.hour.cmp(&other.hour))
+            .then(self.minute.cmp(&other.minute))
+            .then(self.second.cmp(&other.second))
     }
 }
 
@@ -378,11 +406,16 @@ impl PhysicalDB {
             return Ok(DbIssue::OriginDateInvalid);
         }
 
+        let mut time_offset = 0;
         for i in 0..header.records_number {
             let res_record = self.read_record(i);
             if res_record.is_err() {
                 return Ok(DbIssue::RecordCorrupted(i));
             }
+            if time_offset > res_record.as_ref().unwrap().time_offset {
+                return Ok(DbIssue::UnorderedRecord);
+            }
+            time_offset = res_record.as_ref().unwrap().time_offset;
         }
 
         let metadata = self
@@ -391,7 +424,7 @@ impl PhysicalDB {
             .unwrap()
             .metadata()
             .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
-        if metadata.len() > (/* header size */120 + /* records size */ 40 * header.records_number) {
+        if metadata.len() > (/* header size */120 + /* records size */40 * header.records_number) {
             return Ok(DbIssue::MismatchRecordAmount);
         }
 
@@ -481,6 +514,30 @@ mod tests {
     }
 
     #[test]
+    fn date_ord() {
+        let d1 = Timestamp {
+            year: 1994,
+            month: 7,
+            day: 8,
+            hour: 5,
+            minute: 24,
+            second: 23,
+        };
+        let d2 = Timestamp {
+            year: 1993,
+            month: 6,
+            day: 18,
+            hour: 8,
+            minute: 0,
+            second: 1,
+        };
+
+        assert_eq!(d1 > d2, true);
+        assert_eq!(d1 < d2, false);
+        assert_eq!(d1 == d2, false);
+    }
+
+    #[test]
     fn check_healthy_db() {
         let path = "healthy.db";
 
@@ -501,6 +558,31 @@ mod tests {
 
         let err = db.check_db_file().expect("could not check db file.");
         assert_eq!(err, DbIssue::None);
+
+        fs::remove_file(path);
+    }
+
+    #[test]
+    fn check_unordered_db() {
+        let path = "unordered.db";
+
+        fs::remove_file(path);
+
+        let mut db = PhysicalDB::create(&Path::new(path), None).expect("could not create db.");
+        let header = db.read_header().expect("could not read header.");
+
+        // Add 10 record in the DB
+        for i in 0..10 {
+            let origin_record = RecordInfo {
+                time_offset: 9 - i,
+                value: i as u8,
+            };
+            db.append_record(origin_record)
+                .expect("could not append record.");
+        }
+
+        let err = db.check_db_file().expect("could not check db file.");
+        assert_eq!(err, DbIssue::UnorderedRecord);
 
         fs::remove_file(path);
     }
