@@ -101,8 +101,8 @@ impl Timestamp {
     /// Check if a date is valid.
     pub fn is_valid(&self) -> bool {
         let mut valid = true;
-        valid &= 1 >= self.month && self.month <= 12;
-        valid &= 1 >= self.day;
+        valid &= 1 <= self.month && self.month <= 12;
+        valid &= 1 <= self.day;
         valid &= self.hour < 24;
         valid &= self.minute < 60;
         valid &= self.second < 60;
@@ -186,11 +186,14 @@ impl DbHeader {
 }
 
 /// Potential Issue in the DB file
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum DbIssue {
     /// If a record is not properly chonologicaly ordered.
     UnorderedRecord,
     /// If the header is corrupted (cannot be fully read or data are wrong).
     HeaderCorrupted,
+    /// If the date of the DB is invalid.
+    OriginDateInvalid,
     /// If a record is corrupted (cannot be fully read or data are wrong) with its index.
     RecordCorrupted(u64),
     /// If the number of record in the header doesn't match the amount that can be read from the physical file.
@@ -372,7 +375,7 @@ impl PhysicalDB {
         }
         let header = res_header.unwrap();
         if !header.origin_date.is_valid() {
-            return Ok(DbIssue::HeaderCorrupted);
+            return Ok(DbIssue::OriginDateInvalid);
         }
 
         for i in 0..header.records_number {
@@ -396,6 +399,8 @@ impl PhysicalDB {
     }
 }
 
+/// Maybe I can use a in-memory FS for the test instead of dumping files
+/// on disk ?
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -449,7 +454,7 @@ mod tests {
         fs::remove_file(path);
 
         let mut db = PhysicalDB::create(&Path::new(path), None).expect("could not create db.");
-        let header = db.read_header().expect("could not read header");
+        let header = db.read_header().expect("could not read header.");
         assert_eq!(header.records_number, 0);
 
         let origin_record = RecordInfo {
@@ -463,8 +468,39 @@ mod tests {
         let fs_record = db.read_record(0).expect("could not get record.");
         assert_eq!(origin_record, fs_record);
 
-        let header = db.read_header().expect("could not read header");
+        let header = db.read_header().expect("could not read header.");
         assert_eq!(header.records_number, 1);
+
+        fs::remove_file(path);
+    }
+
+    #[test]
+    fn today_is_valid() {
+        let today = Timestamp::from(Utc::now());
+        assert_eq!(today.is_valid(), true);
+    }
+
+    #[test]
+    fn check_healthy_db() {
+        let path = "healthy.db";
+
+        fs::remove_file(path);
+
+        let mut db = PhysicalDB::create(&Path::new(path), None).expect("could not create db.");
+        let header = db.read_header().expect("could not read header.");
+
+        // Add 10 record in the DB
+        for i in 0..10 {
+            let origin_record = RecordInfo {
+                time_offset: 5 + i,
+                value: i as u8,
+            };
+            db.append_record(origin_record)
+                .expect("could not append record.");
+        }
+
+        let err = db.check_db_file().expect("could not check db file.");
+        assert_eq!(err, DbIssue::None);
 
         fs::remove_file(path);
     }
