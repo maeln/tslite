@@ -157,7 +157,7 @@ impl Timestamp {
 /// Represent an entry in the database.
 /// `time_offset` represent the number of seconds passed since the origin date of the DB.
 /// It's a u32, which means you should be able to store record up to 136 years after the origin date of the DB.
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct RecordInfo {
     time_offset: u32,
     value: u8,
@@ -170,6 +170,18 @@ impl From<&[u8]> for RecordInfo {
             time_offset: reader.read_u32::<LittleEndian>().unwrap(),
             value: reader.read_u8().unwrap(),
         }
+    }
+}
+
+impl PartialOrd for RecordInfo {
+    fn partial_cmp(&self, other: &RecordInfo) -> Option<Ordering> {
+        Some(self.time_offset.cmp(&other.time_offset))
+    }
+}
+
+impl Ord for RecordInfo {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.time_offset.cmp(&other.time_offset)
     }
 }
 
@@ -430,6 +442,36 @@ impl PhysicalDB {
 
         Ok(DbIssue::None)
     }
+
+    /// Reorder the record in the DB.
+    /// Use if your DB records got scrambled for some reason.
+    /// Right now it use a simple way :
+    /// - Read all the record
+    /// - reorder them in-memory
+    /// - dump *all* the record in the DB
+    /// It means that if you have just one record wrong you end up re-writing the whole DB.
+    fn reorder_record(&mut self) -> Result<(), EnodError> {
+        if self.file.is_some() {
+            self.open()?;
+        }
+
+        let mut records: Vec<RecordInfo> = Vec::with_capacity(self.header.records_number as usize);
+        for i in 0..(self.header.records_number) {
+            records.push(self.read_record(i)?);
+        }
+        records.sort_unstable();
+        let mut fref = self.file.as_ref().unwrap();
+        fref.seek(SeekFrom::Start(/* offset header */ 15))
+            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+        for r in &records {
+            fref.write(&r.as_bytes())
+                .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+        }
+        fref.sync_all()
+            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+
+        Ok(())
+    }
 }
 
 /// Maybe I can use a in-memory FS for the test instead of dumping files
@@ -583,6 +625,37 @@ mod tests {
 
         let err = db.check_db_file().expect("could not check db file.");
         assert_eq!(err, DbIssue::UnorderedRecord);
+
+        fs::remove_file(path);
+    }
+
+    #[test]
+    fn reorder_db() {
+        let path = "reordered.db";
+
+        fs::remove_file(path);
+
+        let mut db = PhysicalDB::create(&Path::new(path), None).expect("could not create db.");
+        let header = db.read_header().expect("could not read header.");
+
+        // Add 10 record in the DB in reverse order
+        for i in 0..10 {
+            let origin_record = RecordInfo {
+                time_offset: 9 - i,
+                value: i as u8,
+            };
+            db.append_record(origin_record)
+                .expect("could not append record.");
+        }
+
+        let err = db.check_db_file().expect("could not check db file.");
+        assert_eq!(err, DbIssue::UnorderedRecord);
+
+        let res = db.reorder_record();
+        assert_eq!(res.is_ok(), true);
+
+        let err = db.check_db_file().expect("could not check db file.");
+        assert_eq!(err, DbIssue::None);
 
         fs::remove_file(path);
     }
