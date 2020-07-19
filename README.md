@@ -1,6 +1,6 @@
 # TSLite : A small embeddable time-serie database
 
-[![Build Status](https://travis-ci.com/maeln/tslite.svg?branch=master)](tslite)
+[![Build Status](https://travis-ci.com/maeln/tslite.svg?branch=master)](https://travis-ci.com/maeln/tslite)
 [![Crates.io](https://img.shields.io/crates/v/tslite)](https://crates.io/crates/tslite)
 
 
