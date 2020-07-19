@@ -1,8 +1,13 @@
 [package]
-name = "anod"
+name = "tslite"
 version = "0.1.0"
 authors = ["Maël Naccache Tüfekçi <contact@maeln.com>"]
 edition = "2018"
+license = "CECILL-2.1"
+readme = "README.md"
+repository = "https://github.com/maeln/tslite"
+keywords = ["database", "time-serie", "embeddable"]
+description = "TSLite is a small embeddable time-serie database."
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
