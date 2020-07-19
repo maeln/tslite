@@ -13,3 +13,5 @@ git clone https://github.com/maeln/tslite.git
 cd tslite
 cargo doc --open
 ```
+
+Look also at the tests to see exemple of how to use it.

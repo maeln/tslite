@@ -5,7 +5,7 @@
 //! All the operation are made directly on the DB file, so this can get very I/O intensive if you do a lot of operation.
 //! If you are going to push data and read data a lot, you really shouldn't use it directly.
 //!
-//! If you intend to do a lot of operation you should have an layer that will operate in-memory and periodacally
+//! If you intend to do a lot of operation you should have an layer that will operate in-memory and periodically
 //! dump them to the filesystem.
 //!
 //! # DB encoding
