@@ -52,9 +52,11 @@ use std::string::String;
 
 use std::cmp::{Ord, Ordering};
 
+/// A wrapper for various type of error that can occur within TSLite.
 #[derive(Debug, PartialEq)]
-pub enum EnodError {
+pub enum TSLiteError {
     IOError(String),
+    IndexOutOfBound,
 }
 
 /// A way to store date and time in 56bits / 7 octets.
@@ -266,9 +268,9 @@ impl PhysicalDB {
     pub fn create(
         path: &Path,
         origin_date: Option<chrono::DateTime<Utc>>,
-    ) -> Result<PhysicalDB, EnodError> {
+    ) -> Result<PhysicalDB, TSLiteError> {
         let mut file =
-            File::create(path).map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+            File::create(path).map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
 
         // Store the origin date using or own time stamp format. See the Timestamp struct for more info.
         // It lose every timezone info, so everything is normalized as utc+0 before being written.
@@ -280,7 +282,7 @@ impl PhysicalDB {
         };
 
         file.write(&header.as_bytes())
-            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
 
         Ok(PhysicalDB {
             path: PathBuf::from(path),
@@ -290,7 +292,7 @@ impl PhysicalDB {
     }
 
     /// Open the database file in read and write mode.
-    pub fn open(&mut self) -> Result<(), EnodError> {
+    pub fn open(&mut self) -> Result<(), TSLiteError> {
         if self.file.is_some() {
             return Ok(());
         }
@@ -300,20 +302,20 @@ impl PhysicalDB {
                 .read(true)
                 .write(true)
                 .open(&self.path)
-                .map_err(|e| EnodError::IOError(e.to_string().to_string()))?,
+                .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?,
         );
         Ok(())
     }
 
     /// Drop the database file to close it.
     /// Make sure to sync all IO operation before closing it.
-    pub fn close(&mut self) -> Result<(), EnodError> {
+    pub fn close(&mut self) -> Result<(), TSLiteError> {
         if self.file.is_some() {
             self.file
                 .as_ref()
                 .unwrap()
                 .sync_all()
-                .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+                .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
             self.file = None; // Files are close when dropped/out of scope.
         }
 
@@ -322,85 +324,105 @@ impl PhysicalDB {
 
     /// Read the header from the file.
     /// Does not update the header in memory.
-    pub fn read_header(&mut self) -> Result<DbHeader, EnodError> {
+    pub fn read_header(&mut self) -> Result<DbHeader, TSLiteError> {
         if self.file.is_none() {
             self.open()?;
         }
 
         let mut fref = self.file.as_ref().unwrap();
         fref.seek(SeekFrom::Start(0))
-            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
         let mut buffer = [0; 15]; // Header takes 15 bytes.
         let n = fref
             .read(&mut buffer[..])
-            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
         if n == 15 {
             let header: DbHeader = DbHeader::from(&buffer[..]);
             return Ok(header);
         }
 
-        Err(EnodError::IOError(
+        Err(TSLiteError::IOError(
             "Could not read header: not enough octets.".to_string(),
         ))
+    }
+
+    /// Check if a given record index exist within the database.
+    fn check_record_index(&self, rec_id: u64) -> Result<bool, TSLiteError> {
+        let metadata = self
+            .file
+            .as_ref()
+            .unwrap()
+            .metadata()
+            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+        if metadata.len() >= (/* header size */(7+8) + /* records size */(4+1) * rec_id) {
+            return Ok(true);
+        }
+
+        Ok(false)
     }
 
     /// The size of the header and record are static.
     /// So the position of each record is deterministic.
     /// If `n` is the record id, then its position within the file can be computed with :
     /// pos(n) = (7 + 8) + (5*n)
-    pub fn read_record(&mut self, rec_id: u64) -> Result<RecordInfo, EnodError> {
+    pub fn read_record(&mut self, rec_id: u64) -> Result<RecordInfo, TSLiteError> {
         if self.file.is_none() {
             self.open()?;
+        }
+
+        let id_exist = self.check_record_index(rec_id)?;
+        if !id_exist {
+            return Err(TSLiteError::IndexOutOfBound);
         }
 
         let pos = (7 + 8) + (rec_id * 5);
         let mut fref = self.file.as_ref().unwrap();
         fref.seek(SeekFrom::Start(pos))
-            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
         let mut buffer = [0; 5]; // Header takes 15 bytes.
         let n = fref
             .read(&mut buffer[..])
-            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
         if n == 5 {
             let record: RecordInfo = RecordInfo::from(&buffer[..]);
             return Ok(record);
         }
 
-        Err(EnodError::IOError(
+        Err(TSLiteError::IOError(
             "Could not read record: not enough octets.".to_string(),
         ))
     }
 
     /// This utility function will update the number of record in the database.
-    pub fn update_record_number(&mut self, drn: u64) -> Result<(), EnodError> {
+    pub fn update_record_number(&mut self, drn: u64) -> Result<(), TSLiteError> {
         if self.file.is_none() {
             self.open()?;
         }
 
         let mut fref = self.file.as_ref().unwrap();
         fref.seek(SeekFrom::Start(7)) // The record number is always at position 7
-            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
         fref.write_u64::<LittleEndian>(self.header.records_number + drn)
-            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
         self.header.records_number += drn;
 
         Ok(())
     }
 
     /// Add a record in the database.
-    pub fn append_record(&mut self, rec_nfo: RecordInfo) -> Result<(), EnodError> {
-        if self.file.is_some() {
+    pub fn append_record(&mut self, rec_nfo: RecordInfo) -> Result<(), TSLiteError> {
+        if self.file.is_none() {
             self.open()?;
         }
 
         // write record
         let mut fref = self.file.as_ref().unwrap();
         fref.seek(SeekFrom::End(0))
-            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
         fref.write(&rec_nfo.as_bytes())
-            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
         fref.sync_all()
-            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
 
         // Update DbHeader
         self.update_record_number(1)?;
@@ -408,11 +430,34 @@ impl PhysicalDB {
         Ok(())
     }
 
+    /// Change the value of a record within the database.
+    pub fn update_record(&mut self, rec_id: u64, value: u8) -> Result<(), TSLiteError> {
+        if self.file.is_none() {
+            self.open()?;
+        }
+
+        let id_exist = self.check_record_index(rec_id)?;
+        if !id_exist {
+            return Err(TSLiteError::IndexOutOfBound);
+        }
+
+        let pos = (7 + 8) + (rec_id * 5) + 4; // header + records + timestamp
+        let mut fref = self.file.as_ref().unwrap();
+        fref.seek(SeekFrom::Start(pos))
+            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+        fref.write(&[value])
+            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+        fref.sync_all()
+            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+
+        Ok(())
+    }
+
     /// Perform check to find any issue in the database file.
     /// It will return the first issue it find. You might need to run this function
     /// until it return `DbIssue::None` to check for all possible issue.
-    pub fn check_db_file(&mut self) -> Result<DbIssue, EnodError> {
-        if self.file.is_some() {
+    pub fn check_db_file(&mut self) -> Result<DbIssue, TSLiteError> {
+        if self.file.is_none() {
             self.open()?;
         }
 
@@ -438,13 +483,8 @@ impl PhysicalDB {
             time_offset = res_record.as_ref().unwrap().time_offset;
         }
 
-        let metadata = self
-            .file
-            .as_ref()
-            .unwrap()
-            .metadata()
-            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
-        if metadata.len() > (/* header size */120 + /* records size */40 * header.records_number) {
+        let id_exist = self.check_record_index(header.records_number)?;
+        if !id_exist {
             return Ok(DbIssue::MismatchRecordAmount);
         }
 
@@ -458,8 +498,8 @@ impl PhysicalDB {
     /// - reorder them in-memory
     /// - dump *all* the record in the DB
     /// It means that if you have just one record wrong you end up re-writing the whole DB.
-    fn reorder_record(&mut self) -> Result<(), EnodError> {
-        if self.file.is_some() {
+    fn reorder_record(&mut self) -> Result<(), TSLiteError> {
+        if self.file.is_none() {
             self.open()?;
         }
 
@@ -470,13 +510,13 @@ impl PhysicalDB {
         records.sort_unstable();
         let mut fref = self.file.as_ref().unwrap();
         fref.seek(SeekFrom::Start(/* offset header */ 15))
-            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
         for r in &records {
             fref.write(&r.as_bytes())
-                .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+                .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
         }
         fref.sync_all()
-            .map_err(|e| EnodError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
 
         Ok(())
     }
@@ -533,7 +573,6 @@ mod tests {
     #[test]
     fn append_record() {
         let path = "append_record.db";
-
         fs::remove_file(path);
 
         let mut db = PhysicalDB::create(&Path::new(path), None).expect("could not create db.");
@@ -664,6 +703,34 @@ mod tests {
 
         let err = db.check_db_file().expect("could not check db file.");
         assert_eq!(err, DbIssue::None);
+
+        fs::remove_file(path);
+    }
+
+    #[test]
+    fn update_record() {
+        let path = "update_record.db";
+
+        fs::remove_file(path);
+
+        let mut db = PhysicalDB::create(&Path::new(path), None).expect("could not create db.");
+        let header = db.read_header().expect("could not read header.");
+        assert_eq!(header.records_number, 0);
+        let origin_record = RecordInfo {
+            time_offset: 5,
+            value: 10,
+        };
+
+        db.append_record(origin_record)
+            .expect("could not append record.");
+        let mut fs_record = db.read_record(0).expect("could not get record.");
+        assert_eq!(origin_record, fs_record);
+
+        let updated_value = 8;
+        db.update_record(0, updated_value)
+            .expect("Could not update record.");
+        fs_record = db.read_record(0).expect("could not get record.");
+        assert_eq!(updated_value, fs_record.value);
 
         fs::remove_file(path);
     }
