@@ -261,6 +261,47 @@ pub struct PhysicalDB {
 }
 
 impl PhysicalDB {
+    /// This function will create a new database file or open it if it already exists.
+    /// The second argument the date with which to initialize the database. It is optional, if you give `None`
+    /// it will use the current date and time. If the file exists, the date is ignored complitely.
+    pub fn new(
+        path: &Path,
+        origin_date: Option<chrono::DateTime<Utc>>,
+    ) -> Result<PhysicalDB, TSLiteError> {
+        // We need to first check if file exist because we are going to need to write
+        // or read the header depending on it.
+        if path.exists() {
+            let mut file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .append(true) // We don't want to overwritte the DB!
+                .open(&path)
+                .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+
+            file.seek(SeekFrom::Start(0))
+                .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+            let mut buffer = [0; 15]; // Header takes 15 bytes.
+            let n = file
+                .read(&mut buffer[..])
+                .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+            if n == 15 {
+                let header: DbHeader = DbHeader::from(&buffer[..]);
+                return Ok(PhysicalDB {
+                    path: PathBuf::from(path),
+                    file: Some(file), // don't want to open the file right away.
+                    header,
+                });
+            } else {
+                return Err(TSLiteError::IOError(
+                    "DB File header is corrupted.".to_string(),
+                ));
+            }
+        }
+
+        // If it doesn't exist we just create a DB the usual way.
+        PhysicalDB::create(path, origin_date)
+    }
+
     /// This function will create a new database file.
     /// Warning: It will *not* check if there is already a file at `path`, if there is one, it will be overwritten.
     /// The second argument the date with which to initialize the database. It is optional, if you give `None`
