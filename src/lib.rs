@@ -63,12 +63,12 @@ pub enum TSLiteError {
 /// There is no awareness of timezone, everything is assumed to be Utc+0.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Timestamp {
-    year: u16,
-    month: u8,
-    day: u8,
-    hour: u8,
-    minute: u8,
-    second: u8,
+    pub year: u16,
+    pub month: u8,
+    pub day: u8,
+    pub hour: u8,
+    pub minute: u8,
+    pub second: u8,
 }
 
 impl From<chrono::DateTime<Utc>> for Timestamp {
@@ -169,8 +169,8 @@ impl Timestamp {
 /// It's a u32, which means you should be able to store record up to 136 years after the origin date of the DB.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct RecordInfo {
-    time_offset: u32,
-    value: u8,
+    pub time_offset: u32,
+    pub value: u8,
 }
 
 impl From<&[u8]> for RecordInfo {
@@ -208,8 +208,8 @@ impl RecordInfo {
 /// `origin_date` is the date that will be use has the origin. The DB *cannot* contain any record anterior to this date.
 #[derive(Debug, Copy, Clone)]
 pub struct DbHeader {
-    origin_date: Timestamp,
-    records_number: u64,
+    pub origin_date: Timestamp,
+    pub records_number: u64,
 }
 
 impl From<&[u8]> for DbHeader {
@@ -255,9 +255,9 @@ pub enum DbIssue {
 /// a DB in file
 #[derive(Debug)]
 pub struct PhysicalDB {
-    path: PathBuf,
-    file: Option<File>,
-    header: DbHeader,
+    pub path: PathBuf,
+    pub file: Option<File>,
+    pub header: DbHeader,
 }
 
 impl PhysicalDB {
