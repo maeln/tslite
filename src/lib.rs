@@ -124,6 +124,13 @@ impl Ord for Timestamp {
     }
 }
 
+impl Into<DateTime<Utc>> for &Timestamp {
+    fn into(self) -> DateTime<Utc> {
+        Utc.ymd(self.year as i32, self.month as u32, self.day as u32)
+            .and_hms(self.hour as u32, self.minute as u32, self.second as u32)
+    }
+}
+
 impl Timestamp {
     pub fn as_bytes(&self) -> Vec<u8> {
         let mut store: Vec<u8> = Vec::with_capacity(7);
@@ -134,6 +141,13 @@ impl Timestamp {
         store.push(self.minute);
         store.push(self.second);
         store
+    }
+
+    /// Compute the number of second between two date.
+    pub fn offset(&self, date: &Timestamp) -> u32 {
+        let me: DateTime<Utc> = self.into();
+        let other: DateTime<Utc> = date.into();
+        (other - me).num_seconds() as u32
     }
 
     /// Check if a date is valid.
@@ -469,6 +483,19 @@ impl PhysicalDB {
         self.update_record_number(1)?;
 
         Ok(())
+    }
+
+    /// Append a record with the current time.
+    pub fn append_record_now(&mut self, value: u8) -> Result<(), TSLiteError> {
+        let origin = self.header.origin_date;
+        let now = Timestamp::from(Utc::now());
+        let off = origin.offset(&now);
+        let nfo = RecordInfo {
+            value: value,
+            time_offset: off,
+        };
+
+        self.append_record(nfo)
     }
 
     /// Change the value of a record within the database.
