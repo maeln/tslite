@@ -288,7 +288,6 @@ impl PhysicalDB {
             let mut file = OpenOptions::new()
                 .read(true)
                 .write(true)
-                .append(true) // We don't want to overwritte the DB!
                 .open(&path)
                 .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
 
@@ -458,6 +457,8 @@ impl PhysicalDB {
         fref.seek(SeekFrom::Start(7)) // The record number is always at position 7
             .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
         fref.write_u64::<LittleEndian>(self.header.records_number + drn)
+            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+        fref.sync_data()
             .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
         self.header.records_number += drn;
 
