@@ -41,10 +41,9 @@
 
 extern crate chrono;
 
-use chrono::{DateTime, Datelike, Duration, TimeZone, Timelike, Utc};
+use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::error::Error;
 use std::fs::{File, OpenOptions};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -289,14 +288,14 @@ impl PhysicalDB {
                 .read(true)
                 .write(true)
                 .open(&path)
-                .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+                .map_err(|e| TSLiteError::IOError(e.to_string()))?;
 
             file.seek(SeekFrom::Start(0))
-                .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+                .map_err(|e| TSLiteError::IOError(e.to_string()))?;
             let mut buffer = [0; 15]; // Header takes 15 bytes.
             let n = file
                 .read(&mut buffer[..])
-                .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+                .map_err(|e| TSLiteError::IOError(e.to_string()))?;
             if n == 15 {
                 let header: DbHeader = DbHeader::from(&buffer[..]);
                 return Ok(PhysicalDB {
@@ -323,12 +322,11 @@ impl PhysicalDB {
         path: &Path,
         origin_date: Option<chrono::DateTime<Utc>>,
     ) -> Result<PhysicalDB, TSLiteError> {
-        let mut file =
-            File::create(path).map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+        let mut file = File::create(path).map_err(|e| TSLiteError::IOError(e.to_string()))?;
 
         // Store the origin date using or own time stamp format. See the Timestamp struct for more info.
         // It lose every timezone info, so everything is normalized as utc+0 before being written.
-        let date = Timestamp::from(origin_date.unwrap_or(Utc::now()));
+        let date = Timestamp::from(origin_date.unwrap_or_else(Utc::now));
         // We always start with an empty DB, so we store 0 for the number of records.
         let header = DbHeader {
             origin_date: date,
@@ -336,7 +334,7 @@ impl PhysicalDB {
         };
 
         file.write(&header.as_bytes())
-            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string()))?;
 
         Ok(PhysicalDB {
             path: PathBuf::from(path),
@@ -356,7 +354,7 @@ impl PhysicalDB {
                 .read(true)
                 .write(true)
                 .open(&self.path)
-                .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?,
+                .map_err(|e| TSLiteError::IOError(e.to_string()))?,
         );
         Ok(())
     }
@@ -369,7 +367,7 @@ impl PhysicalDB {
                 .as_ref()
                 .unwrap()
                 .sync_all()
-                .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+                .map_err(|e| TSLiteError::IOError(e.to_string()))?;
             self.file = None; // Files are close when dropped/out of scope.
         }
 
@@ -385,11 +383,11 @@ impl PhysicalDB {
 
         let mut fref = self.file.as_ref().unwrap();
         fref.seek(SeekFrom::Start(0))
-            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string()))?;
         let mut buffer = [0; 15]; // Header takes 15 bytes.
         let n = fref
             .read(&mut buffer[..])
-            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string()))?;
         if n == 15 {
             let header: DbHeader = DbHeader::from(&buffer[..]);
             return Ok(header);
@@ -407,7 +405,7 @@ impl PhysicalDB {
             .as_ref()
             .unwrap()
             .metadata()
-            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string()))?;
         if metadata.len() >= (/* header size */(7+8) + /* records size */(4+1) * rec_id) {
             return Ok(true);
         }
@@ -432,11 +430,11 @@ impl PhysicalDB {
         let pos = (7 + 8) + (rec_id * 5);
         let mut fref = self.file.as_ref().unwrap();
         fref.seek(SeekFrom::Start(pos))
-            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string()))?;
         let mut buffer = [0; 5]; // Header takes 15 bytes.
         let n = fref
             .read(&mut buffer[..])
-            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string()))?;
         if n == 5 {
             let record: RecordInfo = RecordInfo::from(&buffer[..]);
             return Ok(record);
@@ -455,11 +453,11 @@ impl PhysicalDB {
 
         let mut fref = self.file.as_ref().unwrap();
         fref.seek(SeekFrom::Start(7)) // The record number is always at position 7
-            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string()))?;
         fref.write_u64::<LittleEndian>(self.header.records_number + drn)
-            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string()))?;
         fref.sync_data()
-            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string()))?;
         self.header.records_number += drn;
 
         Ok(())
@@ -474,11 +472,11 @@ impl PhysicalDB {
         // write record
         let mut fref = self.file.as_ref().unwrap();
         fref.seek(SeekFrom::End(0))
-            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string()))?;
         fref.write(&rec_nfo.as_bytes())
-            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string()))?;
         fref.sync_all()
-            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string()))?;
 
         // Update DbHeader
         self.update_record_number(1)?;
@@ -492,7 +490,7 @@ impl PhysicalDB {
         let now = Timestamp::from(Utc::now());
         let off = origin.offset(&now);
         let nfo = RecordInfo {
-            value: value,
+            value,
             time_offset: off,
         };
 
@@ -513,11 +511,11 @@ impl PhysicalDB {
         let pos = (7 + 8) + (rec_id * 5) + 4; // header + records + timestamp
         let mut fref = self.file.as_ref().unwrap();
         fref.seek(SeekFrom::Start(pos))
-            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string()))?;
         fref.write(&[value])
-            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string()))?;
         fref.sync_all()
-            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string()))?;
 
         Ok(())
     }
@@ -567,7 +565,7 @@ impl PhysicalDB {
     /// - reorder them in-memory
     /// - dump *all* the record in the DB
     /// It means that if you have just one record wrong you end up re-writing the whole DB.
-    fn reorder_record(&mut self) -> Result<(), TSLiteError> {
+    pub fn reorder_record(&mut self) -> Result<(), TSLiteError> {
         if self.file.is_none() {
             self.open()?;
         }
@@ -579,13 +577,13 @@ impl PhysicalDB {
         records.sort_unstable();
         let mut fref = self.file.as_ref().unwrap();
         fref.seek(SeekFrom::Start(/* offset header */ 15))
-            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string()))?;
         for r in &records {
             fref.write(&r.as_bytes())
-                .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+                .map_err(|e| TSLiteError::IOError(e.to_string()))?;
         }
         fref.sync_all()
-            .map_err(|e| TSLiteError::IOError(e.to_string().to_string()))?;
+            .map_err(|e| TSLiteError::IOError(e.to_string()))?;
 
         Ok(())
     }
